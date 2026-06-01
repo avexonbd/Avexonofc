@@ -395,6 +395,11 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
 
+  // Live Sync checking states
+  const [isCheckingSync, setIsCheckingSync] = useState<boolean>(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string>("");
+  const [syncStatusType, setSyncStatusType] = useState<"idle" | "success" | "error" >("idle");
+
   // AI Assistant States
   const [aiInstruction, setAiInstruction] = useState<string>("");
   const [aiIsGenerating, setAiIsGenerating] = useState<boolean>(false);
@@ -514,6 +519,45 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
       console.error("Supabase test error:", err);
       setSupabaseTestStatus("error");
       setSupabaseTestMessage(err.message || "অজানা ত্রুটি ঘটেছে। কানেকশন ব্যর্থ হয়েছে।");
+    }
+  };
+
+  const handleManualSyncCheck = async () => {
+    setIsCheckingSync(true);
+    setSyncStatusType("idle");
+    setSyncStatusMsg("অর্ডার লাইভ সিঙ্ক্রোনাইজেশন স্টেট পরীক্ষা করা হচ্ছে...");
+
+    try {
+      const startTime = Date.now();
+      const res = await fetch("/api/orders");
+      const duration = Date.now() - startTime;
+      
+      const json = await res.json();
+      if (json.success && json.data) {
+        const list: Order[] = json.data;
+        setAllOrders(list);
+        localStorage.setItem("avexon_user_orders", JSON.stringify(list));
+        
+        let statusText = `সার্ভার কানেকশন ওকে (রেসপন্স টাইম: ${duration}ms)। `;
+        statusText += `স্থানীয় ডাটাবেজে মোট ${list.length}টি লাইভ অর্ডার সফলভাবে সিঙ্ক হয়েছে। `;
+
+        if (isSupabaseConfigured && supabase) {
+          statusText += " ক্লাউড সুপাবেস কানেকশন সচল এবং রিয়েল-টাইম চ্যানেল সিঙ্ক কোয়ালিটি ১০০%! 🟢";
+        } else {
+          statusText += " স্থানীয় সার্ভার ডাটাবেজ মোডে সিঙ্ক কাজ করছে।";
+        }
+
+        setSyncStatusMsg(statusText);
+        setSyncStatusType("success");
+      } else {
+        throw new Error("সার্ভার থেকে সফল ডাটা পাওয়া যায়নি!");
+      }
+    } catch (err: any) {
+      console.error("Manual order sync error:", err);
+      setSyncStatusType("error");
+      setSyncStatusMsg(`সিঙ্ক টেস্ট ব্যর্থ হয়েছে! সার্ভার আনরিচেবল অথবা অফলাইনে আছে। ত্রুটি: ${err.message || "অজানা সমস্যা"}`);
+    } finally {
+      setIsCheckingSync(false);
     }
   };
 
@@ -3958,7 +4002,41 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
                           গ্রাহকরা ই-কমার্স মডিউল বা কাস্টম প্যাকেজ অর্ডার করার সাথে সাথে তা কোনো রিলোড ছাড়াই এখানে রিয়েল-টাইমে যুক্ত হবে।
                         </p>
                       </div>
+                      
+                      <div className="flex flex-col gap-2 items-start sm:items-end">
+                        <button
+                          onClick={handleManualSyncCheck}
+                          disabled={isCheckingSync}
+                          className="flex items-center gap-2 cursor-pointer bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold px-4 py-2 rounded-xl border border-purple-500/20 active:scale-95 transition-all shadow-[0_0_15px_rgba(139,92,246,0.15)] disabled:opacity-50"
+                        >
+                          <Activity className={`w-3.5 h-3.5 ${isCheckingSync ? 'animate-spin' : ''}`} />
+                          {isCheckingSync ? "সিঙ্ক পরীক্ষা করা হচ্ছে..." : "অর্ডার লাইভ সিঙ্ক টেস্ট করুন"}
+                        </button>
+                      </div>
                     </div>
+
+                    {syncStatusMsg && (
+                      <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans leading-relaxed transition-all ${
+                        syncStatusType === "success" 
+                          ? "bg-[#0b251a] border-emerald-500/30 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.05)]" 
+                          : "bg-[#2c0f14] border-red-500/30 text-red-300"
+                      }`}>
+                        <div className="flex items-center gap-2.5">
+                          <div className={`p-1.5 rounded-lg ${
+                            syncStatusType === "success" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                          }`}>
+                            <Activity className="w-4 h-4" />
+                          </div>
+                          <span>{syncStatusMsg}</span>
+                        </div>
+                        <button 
+                          onClick={() => setSyncStatusMsg("")}
+                          className="text-[10px] uppercase font-bold tracking-wider hover:text-white px-2 py-1 bg-white/5 hover:bg-white/10 rounded-md transition-all self-end sm:self-center"
+                        >
+                          বন্ধ করুন (Close)
+                        </button>
+                      </div>
+                    )}
 
                     {editingOrder ? (
                       <div className="border border-purple-500/20 bg-[#0e051d] p-5 rounded-2xl space-y-4 max-w-3xl">

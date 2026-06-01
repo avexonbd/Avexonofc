@@ -483,7 +483,13 @@ app.get("/api/orders", async (req, res) => {
             
             // Seed the flat orders table in background silently
             for (const order of ordersList) {
-              dbClient.from("avexon_orders").upsert({ id: order.id, value: order }).catch(() => {});
+              (async () => {
+                try {
+                  await dbClient.from("avexon_orders").upsert({ id: order.id, value: order });
+                } catch (e) {
+                  // backup fail silent
+                }
+              })();
             }
 
             // Save backup to disk
