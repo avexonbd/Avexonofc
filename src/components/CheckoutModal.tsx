@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useContent } from "../context/ContentContext";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
+import { safeLocalStorage } from "../utils/safeStorage";
 
 // Custom WhatsApp Icon Component (SVG based, highly accurate)
 const WhatsAppIcon = ({ className = "w-5 h-5" }) => (
@@ -274,14 +275,14 @@ export default function CheckoutModal({ isOpen, onClose, preselectedWebsiteTitle
           const resJson = await response.json();
           if (resJson.success && resJson.data) {
             setAllOrders(resJson.data);
-            localStorage.setItem("avexon_user_orders", JSON.stringify(resJson.data));
+            safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(resJson.data));
             
             // Show all projects first in tracking mode
             if (modalMode === 'tracking') {
               setSearchedOrdersList(resJson.data);
             }
           } else {
-            const stored = localStorage.getItem("avexon_user_orders");
+            const stored = safeLocalStorage.getItem("avexon_user_orders");
             if (stored) {
               const parsed = JSON.parse(stored) as Order[];
               setAllOrders(parsed);
@@ -292,7 +293,7 @@ export default function CheckoutModal({ isOpen, onClose, preselectedWebsiteTitle
           }
         } catch (err) {
           console.warn("Failed to fetch server orders, using fallback: ", err);
-          const stored = localStorage.getItem("avexon_user_orders");
+          const stored = safeLocalStorage.getItem("avexon_user_orders");
           if (stored) {
             const parsed = JSON.parse(stored) as Order[];
             setAllOrders(parsed);
@@ -322,7 +323,7 @@ export default function CheckoutModal({ isOpen, onClose, preselectedWebsiteTitle
               if (deletedId) {
                 setAllOrders(prev => {
                   const updated = prev.filter(o => o.id !== deletedId);
-                  localStorage.setItem("avexon_user_orders", JSON.stringify(updated));
+                  safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updated));
                   return updated;
                 });
                 if (searchedOrdersList.length > 0) {
@@ -343,7 +344,7 @@ export default function CheckoutModal({ isOpen, onClose, preselectedWebsiteTitle
                   const exists = prev.some(o => o.id === newOrder.id);
                   if (exists) return prev;
                   const updated = [newOrder, ...prev];
-                  localStorage.setItem("avexon_user_orders", JSON.stringify(updated));
+                  safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updated));
                   return updated;
                 });
               }
@@ -360,7 +361,7 @@ export default function CheckoutModal({ isOpen, onClose, preselectedWebsiteTitle
                   } else {
                     updated = [updatedOrder, ...prev];
                   }
-                  localStorage.setItem("avexon_user_orders", JSON.stringify(updated));
+                  safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updated));
                   return updated;
                 });
 
@@ -458,7 +459,7 @@ export default function CheckoutModal({ isOpen, onClose, preselectedWebsiteTitle
       setActiveOrder(newOrder);
 
       try {
-        localStorage.setItem("avexon_user_orders", JSON.stringify(updatedOrders));
+        safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updatedOrders));
         window.dispatchEvent(new Event("storage"));
         // Sync order to backend server database
         fetch("/api/orders", {
@@ -561,7 +562,7 @@ export default function CheckoutModal({ isOpen, onClose, preselectedWebsiteTitle
     setActiveOrder(newOrder);
 
     try {
-      localStorage.setItem("avexon_user_orders", JSON.stringify(updatedOrders));
+      safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updatedOrders));
       window.dispatchEvent(new Event("storage"));
       // Sync order to backend server database
       fetch("/api/orders", {
@@ -622,7 +623,7 @@ export default function CheckoutModal({ isOpen, onClose, preselectedWebsiteTitle
     // Load fresh list
     let currentOrders: Order[] = [];
     try {
-      const stored = localStorage.getItem("avexon_user_orders");
+      const stored = safeLocalStorage.getItem("avexon_user_orders");
       if (stored) {
         currentOrders = JSON.parse(stored) as Order[];
       } else {
@@ -689,11 +690,11 @@ export default function CheckoutModal({ isOpen, onClose, preselectedWebsiteTitle
       }
 
       try {
-        const stored = localStorage.getItem('avexon_orders');
+        const stored = safeLocalStorage.getItem('avexon_orders');
         if (stored) {
           const parsed = JSON.parse(stored);
           const updated = parsed.map(o => o.id === targetOrder.id ? { ...o, hasReviewed: true } : o);
-          localStorage.setItem('avexon_orders', JSON.stringify(updated));
+          safeLocalStorage.setItem('avexon_orders', JSON.stringify(updated));
         }
       } catch (e) {}
 

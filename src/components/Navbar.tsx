@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Menu, X, ArrowRight, ShieldCheck, GraduationCap, Compass } from "lucide-react";
 import NoticeBar from "./NoticeBar";
 import { useContent } from "../context/ContentContext";
+import { safeLocalStorage } from "../utils/safeStorage";
 
 interface NavbarProps {
   activeSection: string;
@@ -28,7 +29,7 @@ export default function Navbar({ activeSection, onNavigate, onOpenTracking }: Na
   useEffect(() => {
     const checkOrders = () => {
       try {
-        const stored = localStorage.getItem("avexon_user_orders");
+        const stored = safeLocalStorage.getItem("avexon_user_orders");
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {

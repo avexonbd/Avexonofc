@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { safeLocalStorage } from "../utils/safeStorage";
 import { 
   Home, 
   Sparkles, 
@@ -26,7 +27,7 @@ export default function FloatingNav({ activeSection, onNavigate }: FloatingNavPr
   // Keep track of whether the initial guide comment has been dismissed
   const [isGuideDismissed, setIsGuideDismissed] = useState<boolean>(() => {
     try {
-      const dismissed = localStorage.getItem("avexon_floating_nav_guide_dismissed");
+      const dismissed = safeLocalStorage.getItem("avexon_floating_nav_guide_dismissed");
       return dismissed === "true";
     } catch {
       return false;
@@ -58,9 +59,9 @@ export default function FloatingNav({ activeSection, onNavigate }: FloatingNavPr
   const dismissGuide = () => {
     setIsGuideDismissed(true);
     try {
-      localStorage.setItem("avexon_floating_nav_guide_dismissed", "true");
+      safeLocalStorage.setItem("avexon_floating_nav_guide_dismissed", "true");
     } catch (e) {
-      console.warn("localStorage is not available: ", e);
+      console.warn("safeLocalStorage is not available: ", e);
     }
   };
 

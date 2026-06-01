@@ -38,6 +38,7 @@ import {
 import { useContent } from "../context/ContentContext";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { WebsiteProduct, Service, PortfolioItem, Testimonial, TeamMember, ContactConfig } from "../types";
+import { safeLocalStorage, safeSessionStorage } from "../utils/safeStorage";
 import { Order, OrderStatus } from "./CheckoutModal";
 
 // Helper function to compress large uploaded image files into small, performant base64 JPEGs (saves localStorage space)
@@ -379,10 +380,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
   const [offerDiscountPercentage, setOfferDiscountPercentage] = useState<number>(10);
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    if (typeof window !== "undefined" && window.sessionStorage) {
-      return sessionStorage.getItem("avexon_admin_authenticated") === "true";
-    }
-    return false;
+    return safeSessionStorage.getItem("avexon_admin_authenticated") === "true";
   });
   const [passcode, setPasscode] = useState<string>("");
   const [authError, setAuthError] = useState<string>("");
@@ -409,16 +407,16 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
   // Supabase Testing States
   const [supabaseTestStatus, setSupabaseTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
   const [supabaseTestMessage, setSupabaseTestMessage] = useState<string>("");
-  const [manualSupabaseUrl, setManualSupabaseUrl] = useState<string>(() => localStorage.getItem("VITE_SUPABASE_URL") || "");
-  const [manualSupabaseKey, setManualSupabaseKey] = useState<string>(() => localStorage.getItem("VITE_SUPABASE_ANON_KEY") || "");
+  const [manualSupabaseUrl, setManualSupabaseUrl] = useState<string>(() => safeLocalStorage.getItem("VITE_SUPABASE_URL") || "");
+  const [manualSupabaseKey, setManualSupabaseKey] = useState<string>(() => safeLocalStorage.getItem("VITE_SUPABASE_ANON_KEY") || "");
 
   const handleSaveManualSupabase = async () => {
     if (!manualSupabaseUrl.trim() || !manualSupabaseKey.trim()) {
       alert("ইনপুট খালি রাখা যাবে না! দয়া করে দুটি ইনপুটই সঠিকভাবে পূরণ করুন।");
       return;
     }
-    localStorage.setItem("VITE_SUPABASE_URL", manualSupabaseUrl.trim());
-    localStorage.setItem("VITE_SUPABASE_ANON_KEY", manualSupabaseKey.trim());
+    safeLocalStorage.setItem("VITE_SUPABASE_URL", manualSupabaseUrl.trim());
+    safeLocalStorage.setItem("VITE_SUPABASE_ANON_KEY", manualSupabaseKey.trim());
 
     try {
       await fetch("/api/supabase-config", {
@@ -440,8 +438,8 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
   };
 
   const handleResetManualSupabase = async () => {
-    localStorage.removeItem("VITE_SUPABASE_URL");
-    localStorage.removeItem("VITE_SUPABASE_ANON_KEY");
+    safeLocalStorage.removeItem("VITE_SUPABASE_URL");
+    safeLocalStorage.removeItem("VITE_SUPABASE_ANON_KEY");
     setManualSupabaseUrl("");
     setManualSupabaseKey("");
 
@@ -553,7 +551,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
       if (json.success && json.data) {
         const list: Order[] = json.data;
         setAllOrders(list);
-        localStorage.setItem("avexon_user_orders", JSON.stringify(list));
+        safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(list));
         
         let statusText = `সার্ভার কানেকশন ওকে (রেসপন্স টাইম: ${duration}ms)। `;
         statusText += `স্থানীয় ডাটাবেজে মোট ${list.length}টি লাইভ অর্ডার সফলভাবে সিঙ্ক হয়েছে। `;
@@ -757,14 +755,14 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
           const json = await res.json();
           if (json.success && json.data) {
             setAllOrders(json.data);
-            localStorage.setItem("avexon_user_orders", JSON.stringify(json.data));
+            safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(json.data));
           } else {
-            const stored = localStorage.getItem("avexon_user_orders");
+            const stored = safeLocalStorage.getItem("avexon_user_orders");
             if (stored) setAllOrders(JSON.parse(stored));
           }
         } catch (err) {
           console.warn("Failed to fetch server orders, using fallback: ", err);
-          const stored = localStorage.getItem("avexon_user_orders");
+          const stored = safeLocalStorage.getItem("avexon_user_orders");
           if (stored) setAllOrders(JSON.parse(stored));
         }
       };
@@ -910,7 +908,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
           
           // Update live state list and mirror updated data back to browser storage
           setAllOrders(ordersList);
-          localStorage.setItem("avexon_user_orders", JSON.stringify(ordersList));
+          safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(ordersList));
           lastOrderCount = ordersList.length;
         } else {
           lastOrderCount = 0;
@@ -933,7 +931,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
               if (deletedId) {
                 setAllOrders(prev => {
                   const updated = prev.filter(o => o.id !== deletedId);
-                  localStorage.setItem("avexon_user_orders", JSON.stringify(updated));
+                  safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updated));
                   lastOrderCount = updated.length;
                   return updated;
                 });
@@ -946,7 +944,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
                   const exists = prev.some(o => o.id === newOrder.id);
                   if (exists) return prev;
                   const updated = [newOrder, ...prev];
-                  localStorage.setItem("avexon_user_orders", JSON.stringify(updated));
+                  safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updated));
                   lastOrderCount = updated.length;
                   // Trigger direct immediate notification and chime without polling delay!
                   triggerNewOrderFeedback(newOrder);
@@ -966,7 +964,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
                   } else {
                     updated = [updatedOrder, ...prev];
                   }
-                  localStorage.setItem("avexon_user_orders", JSON.stringify(updated));
+                  safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updated));
                   lastOrderCount = updated.length;
                   return updated;
                 });
@@ -992,7 +990,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
   useEffect(() => {
     const handleStorageChange = () => {
       try {
-        const stored = localStorage.getItem("avexon_user_orders");
+        const stored = safeLocalStorage.getItem("avexon_user_orders");
         if (stored) {
           const parsed = JSON.parse(stored) as Order[];
           if (Array.isArray(parsed)) {
@@ -1028,9 +1026,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
       const val = await response.json();
       if (response.ok && val.success) {
         setIsAuthenticated(true);
-        if (typeof window !== "undefined" && window.sessionStorage) {
-          sessionStorage.setItem("avexon_admin_authenticated", "true");
-        }
+        safeSessionStorage.setItem("avexon_admin_authenticated", "true");
         setPasscode("");
       } else {
         setAuthError(val.error || "ভুল পাসকোড! অনুগ্রহ করে সঠিক পাসকোড দিন।");
@@ -1039,9 +1035,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
       // Secure local fallback check during sandbox or preview build testing
       if (passcode === "Tasumu@2021") {
         setIsAuthenticated(true);
-        if (typeof window !== "undefined" && window.sessionStorage) {
-          sessionStorage.setItem("avexon_admin_authenticated", "true");
-        }
+        safeSessionStorage.setItem("avexon_admin_authenticated", "true");
         setPasscode("");
       } else {
         setAuthError("ভুল পাসকোড বা সার্ভার সংযোগ ত্রুটি! অনুগ্রহ করে আবার চেষ্টা করুন।");
@@ -1526,7 +1520,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
     setAllOrders(updatedList);
     
     try {
-      localStorage.setItem("avexon_user_orders", JSON.stringify(updatedList));
+      safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updatedList));
       // Force trigger immediate storage update across listener windows
       window.dispatchEvent(new Event("storage"));
       
@@ -1564,12 +1558,12 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
         const updated = allOrders.filter(o => o.id !== orderId);
         setAllOrders(updated);
         try {
-          localStorage.setItem("avexon_user_orders", JSON.stringify(updated));
+          safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(updated));
           
           // Clear active tracking token if focused on this deleted order
-          const trackingId = localStorage.getItem("avexon_active_tracking_id");
+          const trackingId = safeLocalStorage.getItem("avexon_active_tracking_id");
           if (trackingId === orderId) {
-            localStorage.removeItem("avexon_active_tracking_id");
+            safeLocalStorage.removeItem("avexon_active_tracking_id");
           }
           window.dispatchEvent(new Event("storage"));
           
@@ -5455,7 +5449,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
                           <div className="p-3.5 bg-[#140a28] rounded-xl border border-purple-500/5 space-y-1">
                             <div className="text-slate-400 text-[10px] uppercase font-bold">সুপাবেস কানেকশন কুয়েরি</div>
                             <div className="font-mono text-[11px] text-white break-all">
-                              URL: {isSupabaseConfigured ? (localStorage.getItem("VITE_SUPABASE_URL") || ((import.meta as any).env?.VITE_SUPABASE_URL) || "Configured") : "অ-কনফিগারড (Not Configured yet)"}
+                              URL: {isSupabaseConfigured ? (safeLocalStorage.getItem("VITE_SUPABASE_URL") || ((import.meta as any).env?.VITE_SUPABASE_URL) || "Configured") : "অ-কনফিগারড (Not Configured yet)"}
                             </div>
                           </div>
 
@@ -5515,7 +5509,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
                                   সংরক্ষণ ও কানেক্ট করুন
                                 </button>
                                 
-                                {(localStorage.getItem("VITE_SUPABASE_URL") || localStorage.getItem("VITE_SUPABASE_ANON_KEY")) && (
+                                {(safeLocalStorage.getItem("VITE_SUPABASE_URL") || safeLocalStorage.getItem("VITE_SUPABASE_ANON_KEY")) && (
                                   <button
                                     type="button"
                                     onClick={handleResetManualSupabase}

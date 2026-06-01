@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { WebsiteProduct, Service, PortfolioItem, Testimonial, TeamMember, NoticeItem, NoticeConfig, OfferConfig, ContactConfig, PackagePlan } from "../types";
 import { SERVICES, WEBSITES, PORTFOLIO, TESTIMONIALS, TEAM } from "../data";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
+import { safeLocalStorage } from "../utils/safeStorage";
 
 export interface HeroConfig {
   title: string;
@@ -270,18 +271,16 @@ const defaultWhyChooseUsItems = [
 ];
 
 const safeGetLocalStorage = <T,>(key: string, defaultValue: T): T => {
-  if (typeof window !== "undefined" && window.localStorage) {
-    try {
-      const stored = window.localStorage.getItem(key);
-      if (stored) {
-        if (typeof defaultValue === "string" && !stored.startsWith("{") && !stored.startsWith("[")) {
-          return stored as unknown as T;
-        }
-        return JSON.parse(stored) as T;
+  try {
+    const stored = safeLocalStorage.getItem(key);
+    if (stored) {
+      if (typeof defaultValue === "string" && !stored.startsWith("{") && !stored.startsWith("[")) {
+        return stored as unknown as T;
       }
-    } catch (e) {
-      console.warn("Error reading from localStorage:", e);
+      return JSON.parse(stored) as T;
     }
+  } catch (e) {
+    console.warn("Error reading from safeLocalStorage:", e);
   }
   return defaultValue;
 };
@@ -422,22 +421,22 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
             if (d.whyChooseUsItems) setWhyChooseUsItems(d.whyChooseUsItems);
           } else {
             // Fallback to local storage (e.g. if container starts up offline first)
-            const storedHero = localStorage.getItem("avx_c_hero");
-            const storedOwner = localStorage.getItem("avx_c_owner");
-            const storedServices = localStorage.getItem("avx_c_services");
-            const storedWebsites = localStorage.getItem("avx_c_websites");
-            const storedPortfolio = localStorage.getItem("avx_c_portfolio");
-            const storedTestimonials = localStorage.getItem("avx_c_testimonials");
-            const storedTeam = localStorage.getItem("avx_c_team");
-            const storedLogo = localStorage.getItem("avx_c_logo");
-            const storedBranding = localStorage.getItem("avx_c_header_branding");
-            const storedNotice = localStorage.getItem("avx_c_notice");
-            const storedOffer = localStorage.getItem("avx_c_offer");
-            const storedContact = localStorage.getItem("avx_c_contact");
-            const storedHeadings = localStorage.getItem("avx_c_headings");
-            const storedPackagePlans = localStorage.getItem("avx_c_package_plans");
-            const storedWhyChooseUsStats = localStorage.getItem("avx_c_why_choose_us_stats");
-            const storedWhyChooseUsItems = localStorage.getItem("avx_c_why_choose_us_items");
+            const storedHero = safeLocalStorage.getItem("avx_c_hero");
+            const storedOwner = safeLocalStorage.getItem("avx_c_owner");
+            const storedServices = safeLocalStorage.getItem("avx_c_services");
+            const storedWebsites = safeLocalStorage.getItem("avx_c_websites");
+            const storedPortfolio = safeLocalStorage.getItem("avx_c_portfolio");
+            const storedTestimonials = safeLocalStorage.getItem("avx_c_testimonials");
+            const storedTeam = safeLocalStorage.getItem("avx_c_team");
+            const storedLogo = safeLocalStorage.getItem("avx_c_logo");
+            const storedBranding = safeLocalStorage.getItem("avx_c_header_branding");
+            const storedNotice = safeLocalStorage.getItem("avx_c_notice");
+            const storedOffer = safeLocalStorage.getItem("avx_c_offer");
+            const storedContact = safeLocalStorage.getItem("avx_c_contact");
+            const storedHeadings = safeLocalStorage.getItem("avx_c_headings");
+            const storedPackagePlans = safeLocalStorage.getItem("avx_c_package_plans");
+            const storedWhyChooseUsStats = safeLocalStorage.getItem("avx_c_why_choose_us_stats");
+            const storedWhyChooseUsItems = safeLocalStorage.getItem("avx_c_why_choose_us_items");
 
             if (storedHero) setHeroConfig(JSON.parse(storedHero));
             if (storedOwner) setOwner(JSON.parse(storedOwner));
@@ -460,22 +459,22 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {
         console.warn("Failed to load initial state, falling back to local storage: ", e);
         try {
-          const storedHero = localStorage.getItem("avx_c_hero");
-          const storedOwner = localStorage.getItem("avx_c_owner");
-          const storedServices = localStorage.getItem("avx_c_services");
-          const storedWebsites = localStorage.getItem("avx_c_websites");
-          const storedPortfolio = localStorage.getItem("avx_c_portfolio");
-          const storedTestimonials = localStorage.getItem("avx_c_testimonials");
-          const storedTeam = localStorage.getItem("avx_c_team");
-          const storedLogo = localStorage.getItem("avx_c_logo");
-          const storedBranding = localStorage.getItem("avx_c_header_branding");
-          const storedNotice = localStorage.getItem("avx_c_notice");
-          const storedOffer = localStorage.getItem("avx_c_offer");
-          const storedContact = localStorage.getItem("avx_c_contact");
-          const storedHeadings = localStorage.getItem("avx_c_headings");
-          const storedPackagePlans = localStorage.getItem("avx_c_package_plans");
-          const storedWhyChooseUsStats = localStorage.getItem("avx_c_why_choose_us_stats");
-          const storedWhyChooseUsItems = localStorage.getItem("avx_c_why_choose_us_items");
+          const storedHero = safeLocalStorage.getItem("avx_c_hero");
+          const storedOwner = safeLocalStorage.getItem("avx_c_owner");
+          const storedServices = safeLocalStorage.getItem("avx_c_services");
+          const storedWebsites = safeLocalStorage.getItem("avx_c_websites");
+          const storedPortfolio = safeLocalStorage.getItem("avx_c_portfolio");
+          const storedTestimonials = safeLocalStorage.getItem("avx_c_testimonials");
+          const storedTeam = safeLocalStorage.getItem("avx_c_team");
+          const storedLogo = safeLocalStorage.getItem("avx_c_logo");
+          const storedBranding = safeLocalStorage.getItem("avx_c_header_branding");
+          const storedNotice = safeLocalStorage.getItem("avx_c_notice");
+          const storedOffer = safeLocalStorage.getItem("avx_c_offer");
+          const storedContact = safeLocalStorage.getItem("avx_c_contact");
+          const storedHeadings = safeLocalStorage.getItem("avx_c_headings");
+          const storedPackagePlans = safeLocalStorage.getItem("avx_c_package_plans");
+          const storedWhyChooseUsStats = safeLocalStorage.getItem("avx_c_why_choose_us_stats");
+          const storedWhyChooseUsItems = safeLocalStorage.getItem("avx_c_why_choose_us_items");
 
           if (storedHero) setHeroConfig(JSON.parse(storedHero));
           if (storedOwner) setOwner(JSON.parse(storedOwner));
@@ -612,7 +611,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       });
 
       // Synchronously emit live signal timestamp in localStorage for cross-tab preview
-      localStorage.setItem("avexon_content_last_updated", Date.now().toString());
+      safeLocalStorage.setItem("avexon_content_last_updated", Date.now().toString());
 
       // Synchronously write each updated key to Supabase so socket server broadcasts to other listeners instantly
       if (isSupabaseConfigured && supabase) {
@@ -709,100 +708,100 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
 
   const updateHero = (newHero: HeroConfig) => {
     setHeroConfig(newHero);
-    localStorage.setItem("avx_c_hero", JSON.stringify(newHero));
+    safeLocalStorage.setItem("avx_c_hero", JSON.stringify(newHero));
     saveStateToServer({ hero: newHero });
   };
 
   const updateOwner = (newOwner: OwnerConfig) => {
     setOwner(newOwner);
-    localStorage.setItem("avx_c_owner", JSON.stringify(newOwner));
+    safeLocalStorage.setItem("avx_c_owner", JSON.stringify(newOwner));
     saveStateToServer({ owner: newOwner });
   };
 
   const updateServices = (newServices: Service[]) => {
     setServices(newServices);
-    localStorage.setItem("avx_c_services", JSON.stringify(newServices));
+    safeLocalStorage.setItem("avx_c_services", JSON.stringify(newServices));
     saveStateToServer({ services: newServices });
   };
 
   const updateWebsites = (newWebsites: WebsiteProduct[]) => {
     setWebsites(newWebsites);
-    localStorage.setItem("avx_c_websites", JSON.stringify(newWebsites));
+    safeLocalStorage.setItem("avx_c_websites", JSON.stringify(newWebsites));
     try {
-      localStorage.setItem("avexon_user_custom_websites", JSON.stringify(newWebsites));
+      safeLocalStorage.setItem("avexon_user_custom_websites", JSON.stringify(newWebsites));
     } catch(err) {}
     saveStateToServer({ websites: newWebsites });
   };
 
   const updatePortfolio = (newPortfolio: PortfolioItem[]) => {
     setPortfolio(newPortfolio);
-    localStorage.setItem("avx_c_portfolio", JSON.stringify(newPortfolio));
+    safeLocalStorage.setItem("avx_c_portfolio", JSON.stringify(newPortfolio));
     saveStateToServer({ portfolio: newPortfolio });
   };
 
   const updateTestimonials = (newTestimonials: Testimonial[]) => {
     setTestimonials(newTestimonials);
-    localStorage.setItem("avx_c_testimonials", JSON.stringify(newTestimonials));
+    safeLocalStorage.setItem("avx_c_testimonials", JSON.stringify(newTestimonials));
     saveStateToServer({ testimonials: newTestimonials });
   };
 
   const updateTeam = (newTeam: TeamMember[]) => {
     setTeam(newTeam);
-    localStorage.setItem("avx_c_team", JSON.stringify(newTeam));
+    safeLocalStorage.setItem("avx_c_team", JSON.stringify(newTeam));
     saveStateToServer({ team: newTeam });
   };
 
   const updateLogoUrl = (url: string) => {
     setLogoUrl(url);
-    localStorage.setItem("avx_c_logo", url);
+    safeLocalStorage.setItem("avx_c_logo", url);
     saveStateToServer({ logoUrl: url });
   };
 
   const updateHeaderBranding = (newBranding: HeaderBrandingConfig) => {
     setHeaderBranding(newBranding);
-    localStorage.setItem("avx_c_header_branding", JSON.stringify(newBranding));
+    safeLocalStorage.setItem("avx_c_header_branding", JSON.stringify(newBranding));
     saveStateToServer({ headerBranding: newBranding });
   };
 
   const updateNoticeConfig = (newNoticeConfig: NoticeConfig) => {
     setNoticeConfig(newNoticeConfig);
-    localStorage.setItem("avx_c_notice", JSON.stringify(newNoticeConfig));
+    safeLocalStorage.setItem("avx_c_notice", JSON.stringify(newNoticeConfig));
     saveStateToServer({ noticeConfig: newNoticeConfig });
   };
 
   const updateOfferConfig = (newOfferConfig: OfferConfig) => {
     setOfferConfig(newOfferConfig);
-    localStorage.setItem("avx_c_offer", JSON.stringify(newOfferConfig));
+    safeLocalStorage.setItem("avx_c_offer", JSON.stringify(newOfferConfig));
     saveStateToServer({ offerConfig: newOfferConfig });
   };
 
   const updateContactConfig = (newContactConfig: ContactConfig) => {
     setContactConfig(newContactConfig);
-    localStorage.setItem("avx_c_contact", JSON.stringify(newContactConfig));
+    safeLocalStorage.setItem("avx_c_contact", JSON.stringify(newContactConfig));
     saveStateToServer({ contactConfig: newContactConfig });
   };
 
   const updateSectionHeadings = (newHeadings: SectionHeadingsConfig) => {
     setSectionHeadings(newHeadings);
-    localStorage.setItem("avx_c_headings", JSON.stringify(newHeadings));
+    safeLocalStorage.setItem("avx_c_headings", JSON.stringify(newHeadings));
     saveStateToServer({ sectionHeadings: newHeadings });
   };
 
   const updateCustomPackagePlans = (newPlans: Record<string, PackagePlan[]>) => {
     setCustomPackagePlans(newPlans);
-    localStorage.setItem("avx_c_package_plans", JSON.stringify(newPlans));
+    safeLocalStorage.setItem("avx_c_package_plans", JSON.stringify(newPlans));
     saveStateToServer({ customPackagePlans: newPlans });
   };
 
   const updateWhyChooseUsStats = (newStats: any[]) => {
     setWhyChooseUsStats(newStats);
-    localStorage.setItem("avx_c_why_choose_us_stats", JSON.stringify(newStats));
+    safeLocalStorage.setItem("avx_c_why_choose_us_stats", JSON.stringify(newStats));
     saveStateToServer({ whyChooseUsStats: newStats });
   };
 
   const updateWhyChooseUsItems = (newItems: any[]) => {
     setWhyChooseUsItems(newItems);
-    localStorage.setItem("avx_c_why_choose_us_items", JSON.stringify(newItems));
+    safeLocalStorage.setItem("avx_c_why_choose_us_items", JSON.stringify(newItems));
     saveStateToServer({ whyChooseUsItems: newItems });
   };
 
@@ -823,21 +822,21 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     setWhyChooseUsStats(defaultWhyChooseUsStats);
     setWhyChooseUsItems(defaultWhyChooseUsItems);
 
-    localStorage.removeItem("avx_c_hero");
-    localStorage.removeItem("avx_c_owner");
-    localStorage.removeItem("avx_c_services");
-    localStorage.removeItem("avx_c_websites");
-    localStorage.removeItem("avx_c_portfolio");
-    localStorage.removeItem("avx_c_testimonials");
-    localStorage.removeItem("avx_c_team");
-    localStorage.removeItem("avx_c_logo");
-    localStorage.removeItem("avx_c_header_branding");
-    localStorage.removeItem("avx_c_notice");
-    localStorage.removeItem("avx_c_offer");
-    localStorage.removeItem("avx_c_contact");
-    localStorage.removeItem("avx_c_headings");
-    localStorage.removeItem("avx_c_why_choose_us_stats");
-    localStorage.removeItem("avx_c_why_choose_us_items");
+    safeLocalStorage.removeItem("avx_c_hero");
+    safeLocalStorage.removeItem("avx_c_owner");
+    safeLocalStorage.removeItem("avx_c_services");
+    safeLocalStorage.removeItem("avx_c_websites");
+    safeLocalStorage.removeItem("avx_c_portfolio");
+    safeLocalStorage.removeItem("avx_c_testimonials");
+    safeLocalStorage.removeItem("avx_c_team");
+    safeLocalStorage.removeItem("avx_c_logo");
+    safeLocalStorage.removeItem("avx_c_header_branding");
+    safeLocalStorage.removeItem("avx_c_notice");
+    safeLocalStorage.removeItem("avx_c_offer");
+    safeLocalStorage.removeItem("avx_c_contact");
+    safeLocalStorage.removeItem("avx_c_headings");
+    safeLocalStorage.removeItem("avx_c_why_choose_us_stats");
+    safeLocalStorage.removeItem("avx_c_why_choose_us_items");
 
     try {
       await fetch("/api/content", {
