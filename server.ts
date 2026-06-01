@@ -444,57 +444,71 @@ app.get("/api/orders", async (req, res) => {
   try {
     const dbClient = getSupabaseClient();
     if (dbClient) {
-      // Prioritize querying the dedicated avexon_orders flat table
-      const { data: orderRows, error: orderTableError } = await dbClient
-        .from("avexon_orders")
-        .select("*");
+      try {
+        // Set a strict 1500ms timeout for Supabase query to prevent blocking if cloud is down or slow
+        const selectPromise = dbClient.from("avexon_orders").select("*");
+        const result = await Promise.race([
+          selectPromise,
+          new Promise<{ data: null; error: any }>((resolve) =>
+            setTimeout(() => resolve({ data: null, error: new Error("Supabase query timeout") }), 1500)
+          )
+        ]);
 
-      if (!orderTableError && orderRows) {
-        const ordersList = orderRows.map((row: any) => row.value || row);
-        
-        // Save backup to disk
-        try {
-          fs.writeFileSync(ORDERS_DB_FILE, JSON.stringify(ordersList, null, 2), "utf-8");
-        } catch (fsErr) {
-          console.warn("Could not save backup copy of orders data to filesystem:", fsErr);
-        }
-        return res.json({ success: true, data: ordersList });
-      } else {
-        // Fallback to legacy avexon_content "orders" key row
-        const { data: legacyData, error: legacyError } = await dbClient
-          .from("avexon_content")
-          .select("value")
-          .eq("key", "orders")
-          .single();
+        const { data: orderRows, error: orderTableError } = result;
 
-        if (!legacyError && legacyData && Array.isArray(legacyData.value)) {
-          const ordersList = legacyData.value;
+        if (!orderTableError && orderRows) {
+          const ordersList = orderRows.map((row: any) => row.value || row);
           
-          // Seed the flat orders table in the background for automatic migration
-          for (const order of ordersList) {
-            (async () => {
-              try {
-                await dbClient.from("avexon_orders").upsert({ id: order.id, value: order });
-              } catch (e) {
-                // background fail silent
-              }
-            })();
-          }
-
-          // Save backup to disk
+          // Save backup copy locally
           try {
             fs.writeFileSync(ORDERS_DB_FILE, JSON.stringify(ordersList, null, 2), "utf-8");
           } catch (fsErr) {
             console.warn("Could not save backup copy of orders data to filesystem:", fsErr);
           }
           return res.json({ success: true, data: ordersList });
+        } else {
+          // Fallback to legacy avexon_content "orders" key row with strict 1500ms timeout
+          const legacyPromise = dbClient.from("avexon_content").select("value").eq("key", "orders").single();
+          const legacyResult = await Promise.race([
+            legacyPromise,
+            new Promise<{ data: null; error: any }>((resolve) =>
+              setTimeout(() => resolve({ data: null, error: new Error("Supabase query fallback timeout") }), 1500)
+            )
+          ]);
+
+          const { data: legacyData, error: legacyError } = legacyResult;
+
+          if (!legacyError && legacyData && Array.isArray(legacyData.value)) {
+            const ordersList = legacyData.value;
+            
+            // Seed the flat orders table in background silently
+            for (const order of ordersList) {
+              dbClient.from("avexon_orders").upsert({ id: order.id, value: order }).catch(() => {});
+            }
+
+            // Save backup to disk
+            try {
+              fs.writeFileSync(ORDERS_DB_FILE, JSON.stringify(ordersList, null, 2), "utf-8");
+            } catch (fsErr) {
+              console.warn("Could not save backup copy of orders data to filesystem:", fsErr);
+            }
+            return res.json({ success: true, data: ordersList });
+          }
         }
+      } catch (err) {
+        console.warn("Supabase query handling timed out or failed. Falling back to local filesystem storage:", err);
       }
     }
 
+    // Default fast local filesystem fallback if Supabase is offline or not configured
     if (fs.existsSync(ORDERS_DB_FILE)) {
       const fileData = fs.readFileSync(ORDERS_DB_FILE, "utf-8");
-      res.json({ success: true, data: JSON.parse(fileData) });
+      try {
+        res.json({ success: true, data: JSON.parse(fileData) });
+      } catch (parseErr) {
+        console.error("Local file orders_db.json is corrupted:", parseErr);
+        res.json({ success: true, data: [] });
+      }
     } else {
       res.json({ success: true, data: [] });
     }
@@ -504,18 +518,16 @@ app.get("/api/orders", async (req, res) => {
   }
 });
 
-// API to add or update an order in server JSON file and cloud table
+// API to add or update an order in server JSON file and cloud table (Non-blocking background cloud sync)
 app.post("/api/orders", async (req, res) => {
   try {
     const incomingOrder = req.body;
     let ordersList = [];
-    let parsedFromDisk = false;
 
     if (fs.existsSync(ORDERS_DB_FILE)) {
       try {
         const fileData = fs.readFileSync(ORDERS_DB_FILE, "utf-8");
         ordersList = JSON.parse(fileData);
-        parsedFromDisk = true;
       } catch (err) {
         ordersList = [];
       }
@@ -525,42 +537,47 @@ app.post("/api/orders", async (req, res) => {
     if (existingIndex !== -1) {
       ordersList[existingIndex] = { ...ordersList[existingIndex], ...incomingOrder };
     } else {
-      ordersList.unshift(incomingOrder); // Add to the front
+      ordersList.unshift(incomingOrder); // Add brand new orders to the very top
     }
 
-    // Write copy locally to disk
+    // Write copy locally to disk - super fast, done in < 1ms
     fs.writeFileSync(ORDERS_DB_FILE, JSON.stringify(ordersList, null, 2), "utf-8");
 
-    // Write copy securely to cloud Supabase
+    // Immediately respond to the client so user interface doesn't lag
+    res.json({ success: true, data: ordersList });
+
+    // Perform Supabase cloud storage syncing asynchronously in background
     const dbClient = getSupabaseClient();
     if (dbClient) {
-      try {
-        // 1. Try upserting to flat avexon_orders table
-        const { error: flatError } = await dbClient
-          .from("avexon_orders")
-          .upsert({ id: incomingOrder.id, value: incomingOrder });
+      (async () => {
+        try {
+          // 1. Try upserting to flat avexon_orders table
+          const { error: flatError } = await dbClient
+            .from("avexon_orders")
+            .upsert({ id: incomingOrder.id, value: incomingOrder });
 
-        if (flatError) {
-          console.warn("Flat order upsert failed, database schema might require SQL run:", flatError.message);
+          if (flatError) {
+            console.warn("Flat order upsert failed in background:", flatError.message);
+          }
+
+          // 2. Keep legacy 'orders' key row in sync as fallback
+          await dbClient
+            .from("avexon_content")
+            .upsert({ key: "orders", value: ordersList });
+        } catch (dbErr) {
+          console.error("Error persisting orders to server-side Supabase in background:", dbErr);
         }
-
-        // 2. Also keep old avexon_content key row in sync as legacy backup
-        await dbClient
-          .from("avexon_content")
-          .upsert({ key: "orders", value: ordersList });
-      } catch (dbErr) {
-        console.error("Error persisting orders to server-side Supabase:", dbErr);
-      }
+      })();
     }
-
-    res.json({ success: true, data: ordersList });
   } catch (err: any) {
     console.error("Error writing orders database:", err);
-    res.status(500).json({ success: false, error: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
 });
 
-// API to delete an order from server JSON file
+// API to delete an order from server JSON file (Non-blocking background cloud delete)
 app.delete("/api/orders/:id", async (req, res) => {
   try {
     const orderId = req.params.id;
@@ -578,24 +595,29 @@ app.delete("/api/orders/:id", async (req, res) => {
     ordersList = ordersList.filter((o: any) => o.id !== orderId);
     fs.writeFileSync(ORDERS_DB_FILE, JSON.stringify(ordersList, null, 2), "utf-8");
 
-    // Write copy securely to cloud Supabase
+    // Immediately respond to client to refresh active admin list
+    res.json({ success: true, data: ordersList });
+
+    // Perform background cloud deletion
     const dbClient = getSupabaseClient();
     if (dbClient) {
-      try {
-        // 1. Try deleting from flat avexon_orders table
-        await dbClient.from("avexon_orders").delete().eq("id", orderId);
+      (async () => {
+        try {
+          // 1. Delete from flat avexon_orders table
+          await dbClient.from("avexon_orders").delete().eq("id", orderId);
 
-        // 2. Sync legacy copy in avexon_content
-        await dbClient.from("avexon_content").upsert({ key: "orders", value: ordersList });
-      } catch (dbErr) {
-        console.error("Error persisting deleted orders state to server-side Supabase:", dbErr);
-      }
+          // 2. Sync legacy copy in avexon_content
+          await dbClient.from("avexon_content").upsert({ key: "orders", value: ordersList });
+        } catch (dbErr) {
+          console.error("Error persisting deleted orders state to server-side Supabase in background:", dbErr);
+        }
+      })();
     }
-
-    res.json({ success: true, data: ordersList });
   } catch (err: any) {
     console.error("Error deleting order:", err);
-    res.status(500).json({ success: false, error: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
 });
 
