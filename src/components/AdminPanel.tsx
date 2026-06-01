@@ -529,7 +529,24 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
 
     try {
       const startTime = Date.now();
-      const res = await fetch("/api/orders");
+      
+      let url = "/api/orders";
+      if (typeof window !== "undefined") {
+        const origin = window.location.origin;
+        if (origin && origin !== "null" && origin.startsWith("http")) {
+          url = origin + "/api/orders";
+        } else {
+          const href = window.location.href;
+          if (href && href.startsWith("http")) {
+            const match = href.match(/^(https?:\/\/[^\/]+)/);
+            if (match) {
+              url = match[1] + "/api/orders";
+            }
+          }
+        }
+      }
+
+      const res = await fetch(url);
       const duration = Date.now() - startTime;
       
       const json = await res.json();
