@@ -392,6 +392,8 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
   // Orders State (tied to checkout tracking database)
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [orderSearchQuery, setOrderSearchQuery] = useState<string>("");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
 
   // Live Sync checking states
   const [isCheckingSync, setIsCheckingSync] = useState<boolean>(false);
@@ -1007,6 +1009,29 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
       window.removeEventListener("storage", handleStorageChange);
     };
   }, []);
+
+  // Accelerated 2s polling window when the orders live panel is active
+  useEffect(() => {
+    if (activeTab !== "orders") return;
+
+    const fetchOrdersInstantly = async () => {
+      try {
+        const res = await fetch("/api/orders");
+        const json = await res.json();
+        if (json.success && json.data) {
+          const ordersList = json.data;
+          setAllOrders(ordersList);
+          safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(ordersList));
+        }
+      } catch (e) {
+        console.warn("Instant order polling error:", e);
+      }
+    };
+
+    fetchOrdersInstantly();
+    const interval = setInterval(fetchOrdersInstantly, 2000);
+    return () => clearInterval(interval);
+  }, [activeTab]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3998,291 +4023,493 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
                 )}
 
                 {/* 7. ORDERS & TRACKING TAB */}
-                {activeTab === "orders" && (
-                  <div className="space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-purple-500/10 mb-4">
-                      <div>
-                        <h3 className="text-base font-black bg-gradient-to-r from-purple-400 via-pink-400 to-sky-400 bg-clip-text text-transparent font-logo uppercase tracking-tight flex items-center gap-2.5">
-                          <span>Order List (অর্ডার লিস্ট)</span>
-                          <span className="flex items-center gap-1 bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/35 px-2 py-0.5 rounded-full text-[9px] font-mono tracking-widest normal-case font-bold animate-pulse">
-                            <span className="w-1.5 h-1.5 bg-[#10b981] rounded-full animate-ping" />
-                            <span>LIVE SYNC ACTIVE</span>
-                          </span>
-                        </h3>
-                        <p className="text-[10.5px] text-slate-300 font-sans mt-1">
-                          গ্রাহকরা ই-কমার্স মডিউল বা কাস্টম প্যাকেজ অর্ডার করার সাথে সাথে তা কোনো রিলোড ছাড়াই এখানে রিয়েল-টাইমে যুক্ত হবে।
-                        </p>
-                      </div>
+                {activeTab === "orders" && (() => {
+                  // Compute dynamic analytics inside the view to ensure instant reactivity and avoid sync lag
+                  const totalCount = allOrders.length;
+                  const pendingCount = allOrders.filter(o => o.status === "Pending" || o.status === "Payment Checking").length;
+                  const runningCount = allOrders.filter(o => o.status === "Confirmed" || o.status === "Working").length;
+                  const completedCount = allOrders.filter(o => o.status === "Done").length;
+                  const totalEarnings = allOrders.reduce((sum, o) => {
+                    if (o.status !== "Pending" && o.status !== "Payment Checking") {
+                      return sum + (Number(o.price) || 0);
+                    }
+                    return sum;
+                  }, 0);
+
+                  // Perform precise filtering based on tab selection & search queries
+                  const currentFiltered = allOrders.filter(o => {
+                    // 1. Tab grouping filter
+                    if (orderStatusFilter !== "all") {
+                      if (orderStatusFilter === "Pending") {
+                        if (o.status !== "Pending" && o.status !== "Payment Checking") return false;
+                      } else if (orderStatusFilter === "Working") {
+                        if (o.status !== "Confirmed" && o.status !== "Working") return false;
+                      } else {
+                        if (o.status !== "Done") return false;
+                      }
+                    }
+
+                    // 2. Multimodal search query
+                    if (orderSearchQuery.trim()) {
+                      const q = orderSearchQuery.toLowerCase().trim();
+                      const oId = (o.id || "").toLowerCase();
+                      const oName = (o.customerName || "").toLowerCase();
+                      const oPhone = (o.customerPhone || "").toLowerCase();
+                      const oProj = (o.websiteTitle || "").toLowerCase();
+                      const oTxn = (o.transactionId || "").toLowerCase();
+
+                      return oId.includes(q) || oName.includes(q) || oPhone.includes(q) || oProj.includes(q) || oTxn.includes(q);
+                    }
+
+                    return true;
+                  });
+
+                  return (
+                    <div className="space-y-6">
                       
-                      <div className="flex flex-col gap-2 items-start sm:items-end">
-                        <button
-                          onClick={handleManualSyncCheck}
-                          disabled={isCheckingSync}
-                          className="flex items-center gap-2 cursor-pointer bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold px-4 py-2 rounded-xl border border-purple-500/20 active:scale-95 transition-all shadow-[0_0_15px_rgba(139,92,246,0.15)] disabled:opacity-50"
-                        >
-                          <Activity className={`w-3.5 h-3.5 ${isCheckingSync ? 'animate-spin' : ''}`} />
-                          {isCheckingSync ? "সিঙ্ক পরীক্ষা করা হচ্ছে..." : "অর্ডার লাইভ সিঙ্ক টেস্ট করুন"}
-                        </button>
+                      {/* Advanced Real-time Control Header */}
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-purple-500/10">
+                        <div>
+                          <div className="flex items-center gap-2.5">
+                            <h3 className="text-base font-black bg-gradient-to-r from-purple-400 via-pink-400 to-sky-400 bg-clip-text text-transparent font-logo uppercase tracking-tight flex items-center gap-2">
+                              <span>অর্ডার ড্যাশবোর্ড ও ট্র্যাকার (Live Order Panel)</span>
+                            </h3>
+                            <span className="flex items-center gap-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/35 px-2 py-0.5 rounded-full text-[9px] font-mono tracking-widest uppercase font-bold animate-pulse">
+                              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
+                              <span>2s Realtime Sync Mode Active</span>
+                            </span>
+                          </div>
+                          <p className="text-[10.5px] text-slate-300 font-sans mt-1">
+                            ওয়েবসাইটে কোনো অর্ডার হওয়ার সাথে সাথে তা কোনো রিলোড ছাড়াই এই কন্ট্রোল প্যানেলে ২ সেকেন্ডের মধ্যে যুক্ত ও আপডেট হবে।
+                          </p>
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <button
+                            onClick={handleManualSyncCheck}
+                            disabled={isCheckingSync}
+                            className="flex items-center gap-2 cursor-pointer bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold px-4 py-2 rounded-xl border border-purple-500/20 active:scale-95 transition-all shadow-[0_0_15px_rgba(139,92,246,0.15)] disabled:opacity-50"
+                          >
+                            <Activity className={`w-3.5 h-3.5 ${isCheckingSync ? 'animate-spin' : ''}`} />
+                            <span>ম্যানুয়াল রিফ্রেশ করুন</span>
+                          </button>
+                        </div>
                       </div>
-                    </div>
 
-                    {syncStatusMsg && (
-                      <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans leading-relaxed transition-all ${
-                        syncStatusType === "success" 
-                          ? "bg-[#0b251a] border-emerald-500/30 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.05)]" 
-                          : "bg-[#2c0f14] border-red-500/30 text-red-300"
-                      }`}>
-                        <div className="flex items-center gap-2.5">
-                          <div className={`p-1.5 rounded-lg ${
-                            syncStatusType === "success" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
-                          }`}>
-                            <Activity className="w-4 h-4" />
+                      {/* Sync Alert Messages if any */}
+                      {syncStatusMsg && (
+                        <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans leading-relaxed transition-all ${
+                          syncStatusType === "success" 
+                            ? "bg-[#0b251a] border-emerald-500/30 text-emerald-300" 
+                            : "bg-[#2c0f14] border-red-500/30 text-red-300"
+                        }`}>
+                          <div className="flex items-center gap-2.5">
+                            <div className={`p-1.5 rounded-lg ${
+                              syncStatusType === "success" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                            }`}>
+                              <Activity className="w-4 h-4" />
+                            </div>
+                            <span>{syncStatusMsg}</span>
                           </div>
-                          <span>{syncStatusMsg}</span>
+                          <button 
+                            onClick={() => setSyncStatusMsg("")}
+                            className="text-[10px] uppercase font-bold tracking-wider hover:text-white px-2 py-1 bg-white/5 hover:bg-white/10 rounded-md transition-all cursor-pointer"
+                          >
+                            বন্ধ করুন (Close)
+                          </button>
                         </div>
-                        <button 
-                          onClick={() => setSyncStatusMsg("")}
-                          className="text-[10px] uppercase font-bold tracking-wider hover:text-white px-2 py-1 bg-white/5 hover:bg-white/10 rounded-md transition-all self-end sm:self-center"
-                        >
-                          বন্ধ করুন (Close)
-                        </button>
+                      )}
+
+                      {/* Interactive Analytical KPI Cards */}
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
+                        <div className="bg-[#0e051d] border border-purple-500/10 p-4 rounded-2xl flex flex-col justify-between">
+                          <span className="text-[10px] text-slate-400 font-bold tracking-wider block">মোট চেকআউট অর্ডার</span>
+                          <span className="text-2xl font-black font-logo text-purple-400 mt-2 block">{totalCount} <span className="text-[11px] font-sans text-slate-500">টি</span></span>
+                        </div>
+                        <div className="bg-[#2a1b02]/50 border border-amber-500/10 p-4 rounded-2xl flex flex-col justify-between">
+                          <span className="text-[10px] text-amber-400 font-bold tracking-wider block">ভেরিফিকেশন পেন্ডিং ⏳</span>
+                          <span className="text-2xl font-black font-logo text-amber-300 mt-2 block">{pendingCount} <span className="text-[11px] font-sans text-slate-500">টি</span></span>
+                        </div>
+                        <div className="bg-[#04112e]/50 border border-blue-500/10 p-4 rounded-2xl flex flex-col justify-between">
+                          <span className="text-[10px] text-blue-400 font-bold tracking-wider block">চলমান কাজ সমূহ ⚙️</span>
+                          <span className="text-2xl font-black font-logo text-blue-300 mt-2 block">{runningCount} <span className="text-[11px] font-sans text-slate-500">টি</span></span>
+                        </div>
+                        <div className="bg-[#0b2b1a]/50 border border-emerald-500/10 p-4 rounded-2xl flex flex-col justify-between">
+                          <span className="text-[10px] text-emerald-400 font-bold tracking-wider block">সফল সম্পন্ন প্রজেক্ট 🎉</span>
+                          <span className="text-2xl font-black font-logo text-emerald-300 mt-2 block">{completedCount} <span className="text-[11px] font-sans text-slate-500">টি</span></span>
+                        </div>
+                        <div className="bg-[#1e0729] border border-fuchsia-500/10 p-4 rounded-2xl col-span-2 md:col-span-1 flex flex-col justify-between">
+                          <span className="text-[10px] text-fuchsia-400 font-bold tracking-wider block">মোট অর্জিত আয় (৳)</span>
+                          <span className="text-lg font-black font-logo text-fuchsia-300 mt-2 block">৳{totalEarnings.toLocaleString("bn-BD")}</span>
+                        </div>
                       </div>
-                    )}
 
-                    {editingOrder ? (
-                      <div className="border border-purple-500/20 bg-[#0e051d] p-5 rounded-2xl space-y-4 max-w-3xl">
-                        <div className="border-b border-purple-500/10 pb-3 flex items-center justify-between">
-                          <h4 className="text-xs font-bold text-purple-400 uppercase tracking-wider">
-                            কন্ট্রোল অর্ডার ট্র্যাকার: {editingOrder.id}
-                          </h4>
-                          <span className="text-[10px] text-slate-500 font-mono">তারিখ: {editingOrder.createdAt}</span>
+                      {/* Advanced Multi-state Filters, Search & Custom Action Toolbar */}
+                      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-[#0a0314]/80 p-3.5 border border-purple-500/10 rounded-2xl backdrop-blur-md">
+                        {/* Status Classification Tabs */}
+                        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none pb-1 md:pb-0">
+                          {[
+                            { id: "all", label: "সব অর্ডার", count: totalCount },
+                            { id: "Pending", label: "⏳ পেন্ডিং", count: pendingCount },
+                            { id: "Working", label: "⚙️ চলমান", count: runningCount },
+                            { id: "Done", label: "🎉 সম্পন্ন", count: completedCount }
+                          ].map(tab => (
+                            <button
+                              key={tab.id}
+                              onClick={() => setOrderStatusFilter(tab.id)}
+                              className={`px-3.5 py-1.5 text-[11px] font-bold rounded-xl whitespace-nowrap cursor-pointer transition-all ${
+                                orderStatusFilter === tab.id
+                                  ? "bg-purple-600/20 text-[#d8b4fe] border border-purple-500/35"
+                                  : "text-slate-400 hover:text-white hover:bg-white/5 border border-transparent"
+                              }`}
+                            >
+                              <span>{tab.label}</span>
+                              <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded-full bg-purple-950/80 text-purple-300 font-mono font-black border border-purple-800/30">
+                                {tab.count}
+                              </span>
+                            </button>
+                          ))}
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-slate-400 text-[11px] font-bold mb-1.5">গ্রাহকের নাম</label>
-                            <input
-                              type="text"
-                              value={editingOrder.customerName || ""}
-                              onChange={(e) => setEditingOrder({...editingOrder, customerName: e.target.value})}
-                              className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-slate-400 text-[11px] font-bold mb-1.5">যোগাযোগের মোবাইল</label>
-                            <input
-                              type="text"
-                              value={editingOrder.customerPhone || ""}
-                              onChange={(e) => setEditingOrder({...editingOrder, customerPhone: e.target.value})}
-                              className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs font-mono"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-slate-400 text-[11px] font-bold mb-1.5">অর্ডারকৃত মডিউল / প্রোডাক্ট</label>
-                            <input
-                              type="text"
-                              value={editingOrder.websiteTitle || ""}
-                              onChange={(e) => setEditingOrder({...editingOrder, websiteTitle: e.target.value})}
-                              className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none font-sans"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-slate-400 text-[11px] font-bold mb-1.5">কাঙ্ক্ষিত ওয়েবসাইটের নাম (Desired Website Name)</label>
-                            <input
-                              type="text"
-                              value={editingOrder.desiredWebsiteName || ""}
-                              onChange={(e) => setEditingOrder({...editingOrder, desiredWebsiteName: e.target.value})}
-                              placeholder="শুধু রেডিমেড সাইটের জন্য"
-                              className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-slate-400 text-[11px] font-bold mb-1.5">মূল্য (৳)</label>
-                            <input
-                              type="number"
-                              value={editingOrder.price || ""}
-                              onChange={(e) => setEditingOrder({...editingOrder, price: Number(e.target.value)})}
-                              className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs font-mono"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-slate-400 text-[11px] font-bold mb-1.5">পেমেন্ট মেথড</label>
-                            <select
-                              value={editingOrder.paymentMethod}
-                              onChange={(e) => setEditingOrder({...editingOrder, paymentMethod: e.target.value})}
-                              className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2 text-xs focus:outline-none"
+                        {/* Search Query Input field */}
+                        <div className="relative flex-1 max-w-md">
+                          <input
+                            type="text"
+                            placeholder="আইডি, গ্রাহকের নাম, ফোন নম্বর বা ট্রানজেকশন আইডি দিয়ে খুঁজুন..."
+                            value={orderSearchQuery}
+                            onChange={(e) => setOrderSearchQuery(e.target.value)}
+                            className="w-full bg-[#0d071a] border border-purple-500/15 text-slate-100 rounded-xl pl-4 pr-10 py-2.5 text-[11.5px] focus:outline-none focus:border-purple-500/35 placeholder-slate-500"
+                          />
+                          {orderSearchQuery && (
+                            <button 
+                              onClick={() => setOrderSearchQuery("")}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs cursor-pointer"
                             >
-                              <option value="bkash">Bkash (বিকাশ)</option>
-                              <option value="nagad">Nagad (নগদ)</option>
-                              <option value="custom_pkg">Custom Package (কাস্টম প্যাকেজ)</option>
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-slate-400 text-[11px] font-bold mb-1.5">স্যান্ডার মোবাইল নম্বর</label>
-                            <input
-                              type="text"
-                              value={editingOrder.senderNumber || ""}
-                              onChange={(e) => setEditingOrder({...editingOrder, senderNumber: e.target.value})}
-                              className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs font-mono"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-slate-400 text-[11px] font-bold mb-1.5">Transaction ID (TxnID)</label>
-                            <input
-                              type="text"
-                              value={editingOrder.transactionId || ""}
-                              onChange={(e) => setEditingOrder({...editingOrder, transactionId: e.target.value})}
-                              className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs font-mono"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-slate-400 text-[11px] font-bold mb-1.5">ট্র্যাকিং স্ট্যাটাস (Tracking Status)</label>
-                            <select
-                              value={editingOrder.status}
-                              onChange={(e) => setEditingOrder({...editingOrder, status: e.target.value as OrderStatus})}
-                              className="w-full bg-[#110724] border border-purple-500/20 text-indigo-300 font-extrabold rounded-xl px-4 py-2 text-xs focus:outline-none"
-                            >
-                              <option value="Pending">🛡️ Pending (পেমেন্ট ভেরিফাই হচ্ছে)</option>
-                              <option value="Payment Checking">💵 Payment Checking (পেমেন্ট চেক করা হচ্ছে)</option>
-                              <option value="Confirmed">✅ Confirmed (অর্ডার নিশ্চিত করা হয়েছে)</option>
-                              <option value="Working">⚡ Working (কাজ চলমান রয়েছে)</option>
-                              <option value="Done">🎉 Done (কাজ সম্পন্ন এবং সাইট লাইভ)</option>
-                            </select>
-                          </div>
+                              ✕
+                            </button>
+                          )}
                         </div>
+                      </div>
 
-                        {/* If status is Done, unlock target live configurations */}
-                        {editingOrder.status === 'Done' && (
-                          <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 space-y-4">
-                            <p className="text-[11px] text-emerald-400 font-bold block mb-1">
-                              ✓ কাজ সম্পন্ন করা হয়েছে! নিচের ইনফরমেশনগুলো দিন, কাস্টমার তার ট্র্যাকিং প্যানেলে এগুলো সাথে সাথে দেখতে পাবে।
-                            </p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-slate-400 text-[10px] font-bold mb-1">ওয়েবসাইট লাইভ ডোমেন লিংক</label>
-                                <input
-                                  type="text"
-                                  value={editingOrder.websiteLink || ""}
-                                  placeholder="https://client-store.com"
-                                  onChange={(e) => setEditingOrder({...editingOrder, websiteLink: e.target.value})}
-                                  className="w-full bg-[#090312] border border-emerald-500/20 text-slate-200 rounded-xl px-4.5 py-2 text-xs"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-slate-400 text-[10px] font-bold mb-1">এডমিন প্যানেল ইমেইল/লগইন</label>
-                                <input
-                                  type="text"
-                                  value={editingOrder.adminLogin || ""}
-                                  placeholder="admin@client-store.com"
-                                  onChange={(e) => setEditingOrder({...editingOrder, adminLogin: e.target.value})}
-                                  className="w-full bg-[#090312] border border-emerald-500/20 text-slate-200 rounded-xl px-4.5 py-2 text-xs font-mono"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-slate-400 text-[10px] font-bold mb-1">এডমিন প্যানেল পাসওয়ার্ড</label>
-                                <input
-                                  type="text"
-                                  value={editingOrder.adminPassword || ""}
-                                  placeholder="SecurePass@2026"
-                                  onChange={(e) => setEditingOrder({...editingOrder, adminPassword: e.target.value})}
-                                  className="w-full bg-[#090312] border border-emerald-500/20 text-slate-200 rounded-xl px-4.5 py-2 text-xs font-mono"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-slate-400 text-[10px] font-bold mb-1">অতিরিক্ত নোট / নির্দেশনাবলি</label>
-                                <input
-                                  type="text"
-                                  value={editingOrder.adminNotes || ""}
-                                  placeholder="সব সেটআপ রেডি আছে, ড্যাশবোর্ডে গিয়ে প্রোডাক্ট এডিট করুন।"
-                                  onChange={(e) => setEditingOrder({...editingOrder, adminNotes: e.target.value})}
-                                  className="w-full bg-[#090312] border border-emerald-500/20 text-slate-200 rounded-xl px-4.5 py-2 text-xs"
-                                />
-                              </div>
+                      {/* Custom Editing Panel Drawer Integration */}
+                      {editingOrder ? (
+                        <div className="border border-purple-500/25 bg-[#0e051d] p-6 rounded-2xl space-y-6 max-w-4xl relative overflow-hidden shadow-2xl">
+                          <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-purple-500 via-pink-500 to-indigo-500" />
+                          <div className="flex items-center justify-between border-b border-purple-500/10 pb-3.5">
+                            <div className="space-y-1">
+                              <h4 className="text-xs font-black text-purple-400 uppercase tracking-widest font-mono">
+                                এডিট ট্র্যাকার আইডি: {editingOrder.id}
+                              </h4>
+                              <p className="text-[10px] text-slate-400">অর্ডারের ইনফরমেশন ও ট্র্যাকিং স্ট্যাটাস কন্ট্রোল করুন।</p>
+                            </div>
+                            <span className="text-[10px] text-slate-500 font-mono bg-purple-950/40 border border-purple-900/30 px-2.5 py-1 rounded-md">
+                              অর্ডার তৈরি: {editingOrder.createdAt}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 font-sans text-xs">
+                            <div>
+                              <label className="block text-slate-400 text-[10.5px] font-bold mb-1.5">গ্রাহকের নাম (Customer Name)</label>
+                              <input
+                                type="text"
+                                value={editingOrder.customerName || ""}
+                                onChange={(e) => setEditingOrder({...editingOrder, customerName: e.target.value})}
+                                className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-purple-500/25"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-400 text-[10.5px] font-bold mb-1.5">যোগাযোগের মোবাইল</label>
+                              <input
+                                type="text"
+                                value={editingOrder.customerPhone || ""}
+                                onChange={(e) => setEditingOrder({...editingOrder, customerPhone: e.target.value})}
+                                className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-purple-500/25 font-mono"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-400 text-[10.5px] font-bold mb-1.5">অর্ডারকৃত মডিউল / প্রোডাক্ট</label>
+                              <input
+                                type="text"
+                                value={editingOrder.websiteTitle || ""}
+                                onChange={(e) => setEditingOrder({...editingOrder, websiteTitle: e.target.value})}
+                                className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-purple-500/25"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-400 text-[10.5px] font-bold mb-1.5">কাঙ্ক্ষিত ওয়েবসাইটের নাম (Desired Name)</label>
+                              <input
+                                type="text"
+                                value={editingOrder.desiredWebsiteName || ""}
+                                onChange={(e) => setEditingOrder({...editingOrder, desiredWebsiteName: e.target.value})}
+                                placeholder="শুধু রেডিমেড সাইটের ক্ষেত্রে"
+                                className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-purple-500/25"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-400 text-[10.5px] font-bold mb-1.5">প্রজেক্ট বাজেট / মূল্য (৳)</label>
+                              <input
+                                type="number"
+                                value={editingOrder.price || ""}
+                                onChange={(e) => setEditingOrder({...editingOrder, price: Number(e.target.value)})}
+                                className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-purple-500/25 font-mono"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-400 text-[10.5px] font-bold mb-1.5">পেমেন্ট মেথড</label>
+                              <select
+                                value={editingOrder.paymentMethod}
+                                onChange={(e) => setEditingOrder({...editingOrder, paymentMethod: e.target.value})}
+                                className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2 text-xs focus:outline-none"
+                              >
+                                <option value="bkash">Bkash (বিকাশ)</option>
+                                <option value="nagad">Nagad (নগদ)</option>
+                                <option value="custom_pkg">Custom Package (কাস্টম প্যাকেজ)</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-400 text-[10.5px] font-bold mb-1.5">পেমেন্ট প্রেরণকারী মোবাইল</label>
+                              <input
+                                type="text"
+                                value={editingOrder.senderNumber || ""}
+                                onChange={(e) => setEditingOrder({...editingOrder, senderNumber: e.target.value})}
+                                className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none font-mono"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-400 text-[10.5px] font-bold mb-1.5">ট্রানজেকশন আইডি (TxnID)</label>
+                              <input
+                                type="text"
+                                value={editingOrder.transactionId || ""}
+                                onChange={(e) => setEditingOrder({...editingOrder, transactionId: e.target.value})}
+                                className="w-full bg-[#110724] border border-purple-500/10 text-slate-100 rounded-xl px-4 py-2.5 text-xs focus:outline-none font-mono"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-400 text-[10.5px] font-bold mb-1.5">ট্র্যাকিং স্টেট (Current State)</label>
+                              <select
+                                value={editingOrder.status}
+                                onChange={(e) => setEditingOrder({...editingOrder, status: e.target.value as OrderStatus})}
+                                className="w-full bg-[#110724] border border-purple-500/25 text-purple-300 font-bold rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-purple-500/35"
+                              >
+                                <option value="Pending">🛡️ Pending (পেমেন্ট ভেরিফাই হবে)</option>
+                                <option value="Payment Checking">💵 Payment Checking (পেমেন্ট চেক চলছে)</option>
+                                <option value="Confirmed">✅ Confirmed (অর্ডার নিশ্চিত করা হয়েছে)</option>
+                                <option value="Working">⚡ Working (কাজ চলমান রয়েছে)</option>
+                                <option value="Done">🎉 Done (কাজ সম্পন্ন এবং সাইট লাইভ)</option>
+                              </select>
                             </div>
                           </div>
-                        )}
 
-                        <div className="flex justify-end gap-2 pt-2 border-t border-purple-500/10">
-                          <button
-                            onClick={() => setEditingOrder(null)}
-                            className="bg-slate-900 border border-slate-800 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl cursor-pointer"
-                          >
-                            বাতিল করুন
-                          </button>
-                          <button
-                            onClick={handleSaveOrderUpdate}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2 rounded-xl cursor-pointer"
-                          >
-                            স্ট্যাটাস ও ডাটা সংরক্ষণ করুন
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-3.5">
-                        {allOrders.length === 0 ? (
-                          <div className="py-12 text-center text-slate-500 text-xs border border-purple-500/10 rounded-2xl bg-[#0e051d]">
-                            <ListFilter className="w-8 h-8 text-purple-500/30 mx-auto mb-2.5" />
-                            <span>ডাটাবেজে এখনো কোনো চেকআউট বা সক্রিয় অর্ডার জমা হয়নি।</span>
-                          </div>
-                        ) : (
-                          allOrders.map((o) => (
-                            <div key={o.id} className="bg-[#0e051d] border border-purple-500/10 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="font-mono text-[11px] font-bold text-purple-400 uppercase bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-md">
-                                    {o.id}
-                                  </span>
-                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                                    o.status === "Done" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30" :
-                                    o.status === "Working" ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/30" :
-                                    o.status === "Confirmed" ? "bg-blue-500/10 text-blue-400 border border-blue-500/30" :
-                                    "bg-amber-500/10 text-amber-400 border border-amber-500/30"
-                                  }`}>
-                                    {o.status}
-                                  </span>
-                                </div>
-                                <h4 className="text-xs font-bold text-slate-100 font-sans mt-2.5">
-                                  {o.customerName} ({o.customerPhone})
-                                </h4>
-                                <p className="text-[10px] text-slate-400 mt-1 max-w-md line-clamp-1 font-sans">
-                                  প্রজেক্ট: <span className="font-semibold text-slate-200">{o.websiteTitle}</span>{o.desiredWebsiteName && <> • ওয়েবসাইট নাম: <span className="font-extrabold text-[#0ebb52] bg-emerald-500/10 px-1.5 py-0.5 rounded">{o.desiredWebsiteName}</span></>} • মূল্য: ৳{o.price.toLocaleString("bn-BD")}
-                                </p>
-                                <p className="text-[9px] text-slate-500 mt-0.5 font-mono">
-                                  TxnID: {o.transactionId} • Sender: {o.senderNumber} • Method: {o.paymentMethod.toUpperCase()}
-                                </p>
+                          {/* Conditional Admin Logistics Form for Successfully completed orders */}
+                          {editingOrder.status === 'Done' && (
+                            <div className="p-4.5 rounded-2xl border border-emerald-500/20 bg-[#061e12]/60 space-y-4 shadow-inner">
+                              <div className="flex items-center gap-2 text-emerald-400">
+                                <span className="p-1 rounded bg-emerald-500/20 text-xs font-bold leading-none">✓</span>
+                                <span className="text-[11px] font-black uppercase tracking-wider font-sans">
+                                  প্রজেক্ট ডেলিভারি গাইডলাইন ও এক্সেস সিকিউরিটি মডিউল (Live Client credentials)
+                                </span>
                               </div>
+                              <p className="text-[10px] text-slate-300 leading-relaxed">
+                                নিচের তথ্যগুলো পূরণ করলে ক্লায়েন্ট তার ট্র্যাকিং প্যানেলের "Dashboard Access" সেকশনে এক ক্লিকে তার জেনুইন লগইন লিংক ও পাসওয়ার্ড পেয়ে যাবেন।
+                              </p>
                               
-                              <div className="flex items-center gap-2 sm:self-center">
-                                <button
-                                  onClick={() => setEditingOrder(o)}
-                                  className="w-full sm:w-auto flex items-center justify-center gap-1 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 font-bold border border-purple-500/25 py-2 px-3.5 rounded-xl text-[11px] cursor-pointer"
-                                >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                  <span>স্ট্যাটাস চেঞ্জার</span>
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteOrder(o.id)}
-                                  className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl transition-colors cursor-pointer"
-                                  title="অর্ডার ডিলেট"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div>
+                                  <label className="block text-slate-400 text-[10px] font-bold mb-1">ওয়েবসাইট লিংক (Live Domain Link)</label>
+                                  <input
+                                    type="text"
+                                    value={editingOrder.websiteLink || ""}
+                                    placeholder="https://client-store.com"
+                                    onChange={(e) => setEditingOrder({...editingOrder, websiteLink: e.target.value})}
+                                    className="w-full bg-[#030a06] border border-emerald-500/20 text-slate-200 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-emerald-500/40"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-slate-400 text-[10px] font-bold mb-1">এডমিন ইমেইল / লগইন (Log-In Email)</label>
+                                  <input
+                                    type="text"
+                                    value={editingOrder.adminLogin || ""}
+                                    placeholder="admin@client-store.com"
+                                    onChange={(e) => setEditingOrder({...editingOrder, adminLogin: e.target.value})}
+                                    className="w-full bg-[#030a06] border border-emerald-500/20 text-slate-200 rounded-xl px-4 py-2 text-xs font-mono focus:outline-none focus:border-emerald-500/40"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-slate-400 text-[10px] font-bold mb-1">এডমিন পাসওয়ার্ড (Panel Password)</label>
+                                  <input
+                                    type="text"
+                                    value={editingOrder.adminPassword || ""}
+                                    placeholder="SecurePass@2026"
+                                    onChange={(e) => setEditingOrder({...editingOrder, adminPassword: e.target.value})}
+                                    className="w-full bg-[#030a06] border border-emerald-500/20 text-slate-200 rounded-xl px-4 py-2 text-xs font-mono focus:outline-none focus:border-emerald-500/40"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-slate-400 text-[10px] font-bold mb-1">প্রয়োজনীয় নির্দেশনা (Delivery Notes)</label>
+                                  <input
+                                    type="text"
+                                    value={editingOrder.adminNotes || ""}
+                                    placeholder="আপনার প্রোডাক্ট ও ক্যাটালগ সেট করা শেষে ইমেইল ও পাসওয়ার্ড চেঞ্জ করুন।"
+                                    onChange={(e) => setEditingOrder({...editingOrder, adminNotes: e.target.value})}
+                                    className="w-full bg-[#030a06] border border-emerald-500/20 text-slate-200 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-emerald-500/40"
+                                  />
+                                </div>
                               </div>
                             </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+                          )}
+
+                          <div className="flex justify-end gap-2.5 pt-3 border-t border-purple-500/10">
+                            <button
+                              onClick={() => setEditingOrder(null)}
+                              className="bg-slate-950 border border-slate-800 text-slate-400 font-bold text-xs px-4 py-2.5 rounded-xl cursor-pointer hover:bg-slate-900 transition-all active:scale-95"
+                            >
+                              বাতিল করুন
+                            </button>
+                            <button
+                              onClick={handleSaveOrderUpdate}
+                              className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl cursor-pointer transition-all active:scale-95 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+                            >
+                              স্ট্যাটাস ও ডাটা ক্লাউডে সংরক্ষণ করুন
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        
+                        /* Dynamic Order Listing block */
+                        <div className="space-y-4">
+                          {currentFiltered.length === 0 ? (
+                            <div className="py-16 text-center text-slate-400 text-xs border border-purple-500/10 rounded-2xl bg-[#0e051d]">
+                              <ListFilter className="w-9 h-9 text-purple-500/25 mx-auto mb-3" />
+                              <span className="font-sans">প্রদত্ত ফিল্টার অনুযায়ী কোনো অর্ডার ডাটাবেজে খুঁজে পাওয়া যায়নি।</span>
+                            </div>
+                          ) : (
+                            currentFiltered.map((o) => {
+                              // Determine current progress percentage for stepper indicators
+                              const progressPct = 
+                                o.status === "Pending" ? "25%" :
+                                o.status === "Payment Checking" ? "45%" :
+                                o.status === "Confirmed" ? "65%" :
+                                o.status === "Working" ? "85%" : "100%";
+
+                              return (
+                                <div 
+                                  key={o.id} 
+                                  className="bg-[#0e051d] border border-purple-500/10 hover:border-purple-500/20 px-5 py-5.5 rounded-2xl flex flex-col lg:flex-row lg:items-start justify-between gap-5 transition-all shadow-[0_2px_12px_rgba(0,0,0,0.15)]"
+                                >
+                                  
+                                  {/* Left Panel: Primary Data presentation card */}
+                                  <div className="space-y-3.5 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-mono text-[10.5px] font-black text-purple-300 uppercase bg-purple-500/10 border border-purple-500/25 px-2.5 py-0.5 rounded-lg select-all">
+                                        {o.id}
+                                      </span>
+                                      
+                                      <span className={`text-[9px] font-bold px-2.5 py-0.5 rounded-full select-none ${
+                                        o.status === "Done" ? "bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30" :
+                                        o.status === "Working" ? "bg-[#6366f1]/15 text-[#6366f1] border border-[#6366f1]/30" :
+                                        o.status === "Confirmed" ? "bg-[#3b82f6]/15 text-[#3b82f6] border border-[#3b82f6]/30" :
+                                        o.status === "Payment Checking" ? "bg-[#f59e0b]/15 text-[#f59e0b] border border-[#f59e0b]/30" :
+                                        "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                                      }`}>
+                                        ✓ {o.status}
+                                      </span>
+
+                                      <span className="text-[10px] text-slate-500 font-mono select-none">
+                                        তারিখ: {o.createdAt}
+                                      </span>
+                                    </div>
+
+                                    {/* Primary Customer credentials layout */}
+                                    <div className="space-y-1">
+                                      <h4 className="text-[13px] font-bold text-slate-100 font-sans">
+                                        {o.customerName} <span className="text-xs text-slate-400 font-mono">({o.customerPhone})</span>
+                                      </h4>
+                                      <p className="text-[11px] text-slate-300 font-sans">
+                                        বুকিং প্রজেক্ট: <span className="font-extrabold text-white">{o.websiteTitle}</span>
+                                        {o.desiredWebsiteName && (
+                                          <>
+                                            {" • "}
+                                            ওয়েবসাইট নাম: <span className="text-emerald-400 font-extrabold">{o.desiredWebsiteName}</span>
+                                          </>
+                                        )}
+                                      </p>
+                                    </div>
+
+                                    {/* Financial transaction receipts footer */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] text-slate-400 bg-purple-950/20 p-2.5 rounded-xl border border-purple-900/10 font-mono">
+                                      <div>
+                                        TxnID: <span className="text-slate-200 select-all font-bold">{o.transactionId}</span>
+                                      </div>
+                                      <div>
+                                        Sender: <span className="text-slate-200 select-all font-bold">{o.senderNumber}</span>
+                                      </div>
+                                      <div>
+                                        পেমেন্ট গেটওয়ে: <span className="text-purple-300 font-sans font-black uppercase text-[9px] bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded leading-none">{o.paymentMethod || "Bkash/Nagad"}</span>
+                                      </div>
+                                      <div>
+                                        বাজেট: <span className="text-emerald-400 font-sans font-bold text-xs">৳{o.price.toLocaleString("bn-BD")}</span>
+                                      </div>
+                                    </div>
+
+                                    {/* Visually stunning horizontal progress timeline for Admin oversight */}
+                                    <div className="space-y-2 pt-1">
+                                      <div className="flex items-center justify-between text-[8px] text-slate-500 font-sans uppercase tracking-wider font-extrabold select-none">
+                                        <span>১. পেমেন্ট রিসিভ</span>
+                                        <span>২. ভেরিফিকেশন</span>
+                                        <span>৩. কাজ চলমান</span>
+                                        <span>৪. ডেলিভারি সম্পন্ন</span>
+                                      </div>
+                                      {/* Stepper bar base */}
+                                      <div className="h-1.5 w-full bg-[#1b0d36] rounded-full overflow-hidden relative border border-purple-500/5">
+                                        <div 
+                                          className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-emerald-500 transition-all duration-700 ease-out" 
+                                          style={{ width: progressPct }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Right Panel: Functional control triggers */}
+                                  <div className="flex flex-row lg:flex-col lg:items-end justify-end gap-2.5 lg:self-center">
+                                    <button
+                                      onClick={() => {
+                                        setEditingOrder(o);
+                                        // Scroll smoothly to top of the block so edit form is instantly focused
+                                        const el = document.getElementById("admin-content-tabs-container");
+                                        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                                      }}
+                                      className="flex-1 lg:flex-none flex items-center justify-center gap-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 font-bold border border-purple-500/25 py-2.5 px-4 rounded-xl text-[11px] cursor-pointer active:scale-95 transition-all"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5" />
+                                      <span>স্ট্যাটাস ও ডাটা কন্ট্রোলার</span>
+                                    </button>
+                                    
+                                    <button
+                                      onClick={() => handleDeleteOrder(o.id)}
+                                      className="p-2.5 bg-red-500/10 hover:bg-red-500/25 text-red-400 border border-red-500/20 rounded-xl transition-colors cursor-pointer active:scale-95"
+                                      title="অর্ডার ডিলেট"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* 8. AI ASSISTANT CONTENT MODIFIER TAB */}
                 {activeTab === "ai_assistant" && (

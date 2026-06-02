@@ -29,29 +29,51 @@ if (typeof window !== "undefined") {
 
 
   // 2. Global API Fetch Interceptor
-  const originalFetch = window.fetch;
-  window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-    if (typeof input === "string" && input.startsWith("/api/")) {
-      try {
-        const origin = window.location.origin;
-        if (origin && origin !== "null" && origin.startsWith("http")) {
-          input = origin + input;
-        } else {
-          const href = window.location.href;
-          if (href && href.startsWith("http")) {
-            const match = href.match(/^(https?:\/\/[^\/]+)/);
-            if (match) {
-              input = match[1] + input;
+  try {
+    const originalFetch = window.fetch;
+    if (originalFetch) {
+      const customFetch = function (input: RequestInfo | URL, init?: RequestInit) {
+        if (typeof input === "string" && input.startsWith("/api/")) {
+          try {
+            const origin = window.location.origin;
+            if (origin && origin !== "null" && origin.startsWith("http")) {
+              input = origin + input;
+            } else {
+              const href = window.location.href;
+              if (href && href.startsWith("http")) {
+                const match = href.match(/^(https?:\/\/[^\/]+)/);
+                if (match) {
+                  input = match[1] + input;
+                }
+              }
             }
+          } catch (e) {
+            console.warn("Failed to resolve absolute URL for fetch:", e);
           }
         }
-      } catch (e) {
-        console.warn("Failed to resolve absolute URL for fetch:", e);
+        // Call standard fetch explicitly with window context to avoid raw 'illegal invocation' browser errors
+        return originalFetch.call(window, input, init);
+      };
+
+      try {
+        window.fetch = customFetch;
+      } catch (assignErr) {
+        console.warn("[Safe Fetch] Standard window.fetch assignment failed. Attempting Object.defineProperty...", assignErr);
+        try {
+          Object.defineProperty(window, "fetch", {
+            value: customFetch,
+            configurable: true,
+            writable: true,
+            enumerable: true
+          });
+        } catch (defErr) {
+          console.error("[Safe Fetch] Critical failure: window.fetch is completely read-only or unconfigurable.", defErr);
+        }
       }
     }
-    // Call standard fetch explicitly with window context to avoid raw 'illegal invocation' browser errors
-    return originalFetch.call(window, input, init);
-  };
+  } catch (globalFetchError) {
+    console.error("[Safe Fetch] Unexpected error setting up window.fetch interceptor:", globalFetchError);
+  }
 }
 
 // Register Service Worker
