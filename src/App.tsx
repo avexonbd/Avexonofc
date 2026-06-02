@@ -15,6 +15,8 @@ import FloatingNav from "./components/FloatingNav";
 import CheckoutModal from "./components/CheckoutModal";
 import AdminPanel from "./components/AdminPanel";
 import { useContent } from "./context/ContentContext";
+import { safeLocalStorage, safeSessionStorage } from "./utils/safeStorage";
+import { isSupabaseConfigured, supabase } from "./lib/supabase";
 
 export default function App() {
   const { isLoading, logoUrl, headerBranding } = useContent();
@@ -75,6 +77,131 @@ export default function App() {
       window.removeEventListener("scroll", handleScroll);
     };
   }, [isStandalone]);
+
+  // Global Real-time Order synchronization, chime sound & push notifications for Admin (even outside Admin Panel page)
+  useEffect(() => {
+    // Check if this browser is verified to belong to the administrator
+    const isPersistedAdmin = safeLocalStorage.getItem("avexon_admin_authenticated_persist") === "true" ||
+      safeSessionStorage.getItem("avexon_admin_authenticated") === "true" ||
+      window.location.search.includes("mode=standalone");
+
+    if (!isPersistedAdmin) return;
+
+    let localLastCount = -1;
+    // Pre-initialize count from existing stored orders
+    try {
+      const stored = safeLocalStorage.getItem("avexon_user_orders");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          localLastCount = parsed.length;
+        }
+      }
+    } catch (_) {}
+
+    const triggerDoubleChime = () => {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        try {
+          const ctx = new AudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          
+          osc.type = "sine";
+          // Two-tone elegant digital chime
+          osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+          osc.frequency.setValueAtTime(880.00, ctx.currentTime + 0.12); // A5
+          gain.gain.setValueAtTime(0.08, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+          
+          osc.start();
+          osc.stop(ctx.currentTime + 0.5);
+        } catch (e) {
+          console.log("Global chime play skipped or muted:", e);
+        }
+      }
+    };
+
+    const triggerPushNotification = (newlyCreated: any) => {
+      if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          new Notification("নতুন অর্ডার রিসিভড! 🔔", {
+            body: `ক্লায়েন্ট ${newlyCreated.customerName || "অজ্ঞাতনামা"} একটি অর্ডার পাঠিয়েছেন। প্রজেক্ট: ${newlyCreated.websiteTitle || "কাস্টম সার্ভিস"}`,
+            icon: "/icon-512.png",
+            badge: "/icon-512.png",
+          });
+        } catch (e) {
+          console.log("Global push notification build failed:", e);
+        }
+      }
+    };
+
+    const handleNewIncomingOrders = (ordersList: any[]) => {
+      // If the actual AdminPanel is open in standard/standalone, it already handles chimes and notifications perfectly,
+      // so we avoid double beeping completely.
+      if ((window as any).avexonAdminPanelActive) {
+        localLastCount = ordersList.length;
+        return;
+      }
+
+      if (localLastCount !== -1 && ordersList.length > localLastCount) {
+        const newlyCreated = ordersList[0]; // Newest order is unshifted at front
+        triggerDoubleChime();
+        triggerPushNotification(newlyCreated);
+      }
+      
+      localLastCount = ordersList.length;
+      
+      // Sync list state dynamically to localStorage to trigger changes across all other navbar badges/indicators
+      safeLocalStorage.setItem("avexon_user_orders", JSON.stringify(ordersList));
+      window.dispatchEvent(new Event("storage"));
+    };
+
+    const checkOrdersLoop = async () => {
+      try {
+        const response = await fetch("/api/orders");
+        const json = await response.json();
+        if (json.success && Array.isArray(json.data)) {
+          handleNewIncomingOrders(json.data);
+        }
+      } catch (err) {
+        console.warn("Global background sync loop failed:", err);
+      }
+    };
+
+    // 1. Fetch instantly and then check every 8 seconds as safety polling fallback
+    checkOrdersLoop();
+    const intervalId = setInterval(checkOrdersLoop, 8000);
+
+    // 2. Real-time instant websocket notification if cloud database is active
+    let subscription_channel: any = null;
+    if (isSupabaseConfigured && supabase) {
+      try {
+        subscription_channel = supabase
+          .channel("avexon_orders_realtime_global_app")
+          .on(
+            "postgres_changes",
+            { event: "INSERT", schema: "public", table: "avexon_orders" },
+            () => {
+              // Retrieve full updated listing when order is inserted
+              checkOrdersLoop();
+            }
+          )
+          .subscribe();
+      } catch (e) {
+        console.warn("Global supabase websocket channel creation failed:", e);
+      }
+    }
+
+    return () => {
+      clearInterval(intervalId);
+      if (subscription_channel) {
+        subscription_channel.unsubscribe();
+      }
+    };
+  }, []);
 
   // Soft scroll to selected component block
   const scrollToSection = (sectionId: string) => {

@@ -843,6 +843,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
 
   // Real-time Push Notification, Badge count & Supabase Channel sync handling (PWA/Admin)
   useEffect(() => {
+    (window as any).avexonAdminPanelActive = true;
     let lastOrderCount = -1;
     let ordersSubscription: any = null;
 
@@ -981,6 +982,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
     checkNewOrders();
     const timer = setInterval(checkNewOrders, 5000);
     return () => {
+      (window as any).avexonAdminPanelActive = false;
       clearInterval(timer);
       if (ordersSubscription) {
         ordersSubscription.unsubscribe();
@@ -1052,6 +1054,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
       if (response.ok && val.success) {
         setIsAuthenticated(true);
         safeSessionStorage.setItem("avexon_admin_authenticated", "true");
+        safeLocalStorage.setItem("avexon_admin_authenticated_persist", "true");
         setPasscode("");
       } else {
         setAuthError(val.error || "ভুল পাসকোড! অনুগ্রহ করে সঠিক পাসকোড দিন।");
@@ -1061,6 +1064,7 @@ export default function AdminPanel({ isOpen, onClose, isStandalonePWA = false }:
       if (passcode === "Tasumu@2021") {
         setIsAuthenticated(true);
         safeSessionStorage.setItem("avexon_admin_authenticated", "true");
+        safeLocalStorage.setItem("avexon_admin_authenticated_persist", "true");
         setPasscode("");
       } else {
         setAuthError("ভুল পাসকোড বা সার্ভার সংযোগ ত্রুটি! অনুগ্রহ করে আবার চেষ্টা করুন।");
